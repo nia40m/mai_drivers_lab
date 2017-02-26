@@ -15,6 +15,12 @@ module_param(buff_size, int, 0000);
 
 /* defenition of all file_operation functions */
 static int mai_pipe_open(struct inode *inode, struct file *file);
+
+static ssize_t mai_pipe_read_superuser
+(struct file *file, char *buff, size_t size, loff_t *off);
+
+static ssize_t mai_pipe_write_superuser
+(struct file *file, const char *buff, size_t size, loff_t *off);
 /* end of defenition*/
 
 /* fops for all users */
@@ -22,11 +28,15 @@ static struct file_operations mai_pipe_fops = {
     .owner = THIS_MODULE,
     .open  = mai_pipe_open,
 };
-/* fops for superuser
-static struct file_operations mai_pipe_fops_superuser = {
 
+/* fops for superuser */
+static struct file_operations mai_pipe_fops_superuser = {
+    .owner = THIS_MODULE,
+    .open  = mai_pipe_open,
+    .read  = mai_pipe_read_superuser,
+    .write = mai_pipe_write_superuser,
 };
-*/
+
 
 
 static int __init mai_pipe_init(void)
@@ -55,7 +65,31 @@ static int mai_pipe_open(struct inode *inode, struct file *file)
     uid  = cred->uid.val;
     put_cred(cred);
 
+    /* replacement of fops for superuser */
+    if (uid == MAI_SUPERUSER_UID) {
+        file->f_op = &mai_pipe_fops_superuser;
+        return 0;
+    }
+
     return -1;
+}
+
+static ssize_t mai_pipe_read_superuser
+(struct file *file, char *buff, size_t size, loff_t *off)
+{
+    pr_info("Superuser is trying to read info! "
+        "Ha-ha, RETARD! YOU CAN'T DO SUCH THING!\n");
+
+    return 0;
+}
+
+static ssize_t mai_pipe_write_superuser
+(struct file *file, const char *buff, size_t size, loff_t *off)
+{
+    pr_info("Superuser is trying to write info! "
+        "USE LINUX KERNEL PIPE, SCALLYWAG!\n");
+
+    return (ssize_t) size;
 }
 
 
