@@ -6,6 +6,7 @@
 #include <linux/cred.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <asm/uaccess.h>
 
 #define MAI_SUPERUSER_UID 0
 #define MAI_BUFF_SIZE_DEFAULT 128
@@ -20,6 +21,12 @@ static int mai_pipe_open(struct inode *inode, struct file *file);
 
 static int mai_pipe_close(struct inode *inode, struct file *file);
 
+static ssize_t mai_pipe_read
+(struct file *file, char *buff, size_t size, loff_t *off);
+
+static ssize_t mai_pipe_write
+(struct file *file, const char *buff, size_t size, loff_t *off);
+
 static ssize_t mai_pipe_read_superuser
 (struct file *file, char *buff, size_t size, loff_t *off);
 
@@ -32,8 +39,8 @@ static struct file_operations mai_pipe_fops = {
     .owner   = THIS_MODULE,
     .open    = mai_pipe_open,
     .release = mai_pipe_close,
-    .read  = mai_pipe_read_superuser,
-    .write = mai_pipe_write_superuser,
+    .read    = mai_pipe_read,
+    .write   = mai_pipe_write,
 };
 
 /* fops for superuser */
@@ -145,7 +152,7 @@ static int mai_pipe_close(struct inode *inode, struct file *file)
     curr = (struct buffer *) file->private_data;
     curr->opened--;
 
-    if (curr->opened)
+    if (curr->num || curr->opened)
         return 0;
 
     list_del(&(curr->list));
@@ -153,6 +160,104 @@ static int mai_pipe_close(struct inode *inode, struct file *file)
     kfree(curr);
 
     return 0;
+}
+
+static void read_from_buffer(struct buffer *from, char *to, size_t size)
+{
+    int i, j = 0;
+
+    for (i = from->off_start; j < size; i = (i + 1) % buff_size)
+        to[j++] = from->buff[i];
+
+    from->off_start = (from->off_start + size) % buff_size;
+    from->num -= size;
+}
+
+static ssize_t mai_pipe_read
+(struct file *file, char *buff, size_t size, loff_t *off)
+{
+    int status;
+    size_t actual_size;
+    char *temp_buff;
+    struct buffer *curr;
+
+    curr = (struct buffer *) file->private_data;
+
+    temp_buff = (char *) kmalloc(size, GFP_KERNEL);
+    if (temp_buff == NULL)
+        return -1;
+
+    actual_size = (curr->num >= size) ? size : curr->num;
+
+    read_from_buffer(curr, temp_buff, actual_size);
+
+/*
+    while (actual_size < size && curr->opened > 1) {
+        // curr->num = 0
+        выйти из сна, когда он не равен 0 или нету кому дописать
+    if (curr->num < size && curr->opened > 1)
+        wait_for_more_info
+    }
+*/
+
+    status = copy_to_user(buff, temp_buff, actual_size);
+
+    kfree(temp_buff);
+
+    if (status)
+        return -1;
+
+    *off += actual_size;
+    return actual_size;
+}
+
+static void write_to_buffer(struct buffer *to, char *from, size_t size)
+{
+    int i, j = 0;
+
+    for (i = to->off_end; j < size; i = (i + 1) % buff_size)
+        to->buff[i] = from[j++];
+
+    to->off_end = (to->off_end + size) % buff_size;
+    to->num += size;
+}
+
+static ssize_t mai_pipe_write
+(struct file *file, const char *buff, size_t size, loff_t *off)
+{
+    int status;
+    int free;
+    size_t actual_size;
+    char *temp_buff;
+    struct buffer *curr;
+
+    curr = (struct buffer *) file->private_data;
+
+    temp_buff = (char *) kmalloc(size, GFP_KERNEL);
+    if (temp_buff == NULL)
+        return -1;
+
+    status = copy_from_user(temp_buff, buff, size);
+    if (status) {
+        kfree(temp_buff);
+        return -1;
+    }
+
+    free = buff_size - curr->num;
+    actual_size = (free >= size) ? size : free;
+
+    write_to_buffer(curr, temp_buff, actual_size);
+
+/*
+    while (actual_size < size && curr->opened > 1) {
+        curr->num = buff_size
+
+    }
+*/
+
+    kfree(temp_buff);
+    *off += actual_size;
+    return actual_size;
 }
 
 static ssize_t mai_pipe_read_superuser
