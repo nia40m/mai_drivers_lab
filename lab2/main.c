@@ -7,6 +7,8 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <asm/uaccess.h>
+#include <linux/wait.h>
+#include <linux/sched.h>
 
 #define MAI_SUPERUSER_UID 0
 #define MAI_BUFF_SIZE_DEFAULT 128
@@ -53,6 +55,7 @@ static struct file_operations mai_pipe_fops_superuser = {
 
 
 
+static wait_queue_head_t wait_queue;
 static struct list_head list_head;
 
 struct buffer {
@@ -74,6 +77,7 @@ static int __init mai_pipe_init(void)
         return -1;
 
     INIT_LIST_HEAD(&list_head);
+    init_waitqueue_head(&wait_queue);
 
     return 0;
 }
@@ -152,8 +156,10 @@ static int mai_pipe_close(struct inode *inode, struct file *file)
     curr = (struct buffer *) file->private_data;
     curr->opened--;
 
-    if (curr->num || curr->opened)
+    if (curr->num || curr->opened) {
+        wake_up_interruptible(&wait_queue);
         return 0;
+    }
 
     list_del(&(curr->list));
     kfree(curr->buff);
@@ -191,14 +197,26 @@ static ssize_t mai_pipe_read
 
     read_from_buffer(curr, temp_buff, actual_size);
 
-/*
+    wake_up_interruptible(&wait_queue);
+
     while (actual_size < size && curr->opened > 1) {
-        // curr->num = 0
-        выйти из сна, когда он не равен 0 или нету кому дописать
-    if (curr->num < size && curr->opened > 1)
-        wait_for_more_info
+        int temp_size;
+
+        wait_event_interruptible(wait_queue,
+            curr->num > 0 || curr->opened == 1);
+
+        temp_size = size - actual_size;
+
+        if (curr->num > 0)
+            temp_size = (temp_size > curr->num) ? curr->num : temp_size;
+        else
+            break;
+
+        read_from_buffer(curr, temp_buff + actual_size, temp_size);
+        actual_size += temp_size;
+
+        wake_up_interruptible(&wait_queue);
     }
-*/
 
     status = copy_to_user(buff, temp_buff, actual_size);
 
@@ -248,12 +266,23 @@ static ssize_t mai_pipe_write
 
     write_to_buffer(curr, temp_buff, actual_size);
 
-/*
-    while (actual_size < size && curr->opened > 1) {
-        curr->num = buff_size
+    wake_up_interruptible(&wait_queue);
 
+    while (actual_size < size) {
+        int temp_size;
+
+        wait_event_interruptible(wait_queue, curr->num < buff_size);
+
+        temp_size = size - actual_size;
+        free = buff_size - curr->num;
+
+        temp_size = (temp_size > free) ? free : temp_size;
+
+        write_to_buffer(curr, temp_buff + actual_size, temp_size);
+        actual_size += temp_size;
+
+        wake_up_interruptible(&wait_queue);
     }
-*/
 
     kfree(temp_buff);
     *off += actual_size;
