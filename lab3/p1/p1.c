@@ -14,6 +14,12 @@
 #define BUFF_LENG 256
 
 static char mac_address[MAC_LENG];
+static char hex_symb[] = {
+    0x30, 0x31, 0x32, 0x33,
+    0x34, 0x35, 0x36, 0x37,
+    0x38, 0x39, 0x61, 0x62,
+    0x63, 0x64, 0x65, 0x66
+};
 
 
 
@@ -30,7 +36,7 @@ static struct device *my_device;
 
 static int __init myinit(void)
 {
-    int status;
+    int status, i;
     void *mem;
 
     status = alloc_chrdev_region(&my_dev_t, 0, 1, "n4_wifi");
@@ -49,10 +55,9 @@ static int __init myinit(void)
 
     /* getting mac-address */
     mem = ioremap(BASE_ADDR, ADDR_LENG);
-    ioread8_rep(mem + MAC_ADDR, mac_address, MAC_LENG);
+    for (i = 0; i < MAC_LENG; i++)
+        mac_address[i] = ioread8(mem + MAC_ADDR + i);
     iounmap(mem);
-
-    pr_info("%x\n", mac_address[3]);
 
     return 0;
 }
@@ -70,8 +75,8 @@ static int mac_to_str(char *buff)
     int i, j;
 
     for (i = j = 0; i < MAC_LENG; i++) {
-        buff[j++] = (mac_address[i] >> 4)   + '0';
-        buff[j++] = (mac_address[i] & 0x0f) + '0';
+        buff[j++] = hex_symb[(mac_address[i] & 0xf0) >> 4];
+        buff[j++] = hex_symb[mac_address[i] & 0x0f];
         buff[j++] = ':';
     }
     buff[j - 1] = '\n';
@@ -83,6 +88,9 @@ static ssize_t myread(struct file *file, char *buff, size_t size, loff_t *off)
 {
     int num, status;
     char *temp;
+
+    if (*off != 0)
+        return 0;
 
     temp = devm_kmalloc(my_device, BUFF_LENG, GFP_KERNEL);
     if (temp == NULL)
@@ -101,6 +109,7 @@ static ssize_t myread(struct file *file, char *buff, size_t size, loff_t *off)
     if (status)
         return -1;
 
+    *off += num;
     return (ssize_t) num;
 }
 
