@@ -5,25 +5,26 @@
 #include <linux/fs.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
+#include <asm/uaccess.h>
 
 #define BASE_ADDR 0xf0100000
 #define ADDR_LENG 0x10000
 #define MAC_ADDR  0x8000
-#define MAC_LENG  12
+#define MAC_LENG  6
 #define BUFF_LENG 256
 
 static char mac_address[MAC_LENG];
 
 
 
-static ssize_t myread(strcut file *file, char *buff, size_t size, loff_t *off);
+static ssize_t myread(struct file *file, char *buff, size_t size, loff_t *off);
 
-static struct file_operations {
+static struct file_operations my_fops = {
     .read = myread,
-} my_fops;
+};
 
 static dev_t  my_dev_t;
-static cdev   my_cdev;
+static struct cdev   my_cdev;
 static struct class  *my_class;
 static struct device *my_device;
 
@@ -51,6 +52,8 @@ static int __init myinit(void)
     ioread8_rep(mem + MAC_ADDR, mac_address, MAC_LENG);
     iounmap(mem);
 
+    pr_info("%x\n", mac_address[3]);
+
     return 0;
 }
 
@@ -71,29 +74,32 @@ static int mac_to_str(char *buff)
         buff[j++] = (mac_address[i] & 0x0f) + '0';
         buff[j++] = ':';
     }
-    buff[--j] = 0;
+    buff[j - 1] = '\n';
 
     return j;
 }
 
-static ssize_t myread(strcut file *file, char *buff, size_t size, loff_t *off)
+static ssize_t myread(struct file *file, char *buff, size_t size, loff_t *off)
 {
-    int num;
+    int num, status;
     char *temp;
 
-    temp = devm_kmalloc(&my_device, BUFF_LENG, GFP_KERNEL);
+    temp = devm_kmalloc(my_device, BUFF_LENG, GFP_KERNEL);
     if (temp == NULL)
         return -1;
 
     num = mac_to_str(temp);
 
     if (size < num) {
-        devm_kfree(temp);
+        devm_kfree(my_device, temp);
         return 0;
     }
 
-    copy_to_user(buff, temp, num);
-    devm_kfree(temp);
+    status = copy_to_user(buff, temp, num);
+    devm_kfree(my_device, temp);
+
+    if (status)
+        return -1;
 
     return (ssize_t) num;
 }
