@@ -39,17 +39,11 @@ static int myprobe(struct pci_dev *dev, const struct pci_device_id *id)
     int status;
     void *mem;
 
-    /* tooked from the real device driver, because it solve some issue */
-    //pci_disable_link_state(dev, PCIE_LINK_STATE_L0S);
-
     status = pci_enable_device(dev);
     if (status) {
         pr_info("n4: PCI can't enable device\n");
         return -1;
     }
-
-    //pci_write_config_byte(dev, PCI_LATENCY_TIMER, 0xa8);
-    //pci_set_master(dev);
 
     status = pci_request_region(dev, 0, "n4_wifi");
     if (status) {
@@ -59,28 +53,14 @@ static int myprobe(struct pci_dev *dev, const struct pci_device_id *id)
 
     mem = ioremap(pci_resource_start(dev, 0), pci_resource_len(dev, 0));
 
-    pr_info("0x%x\n", ioread32(mem + 0x8004));
-
-/*
-    iowrite32(0x1f, mem + 0x6000);
-    iowrite32(ioread32(mem + 0x6008) | 1, mem + 0x6008);
-
-    data = ioread32(mem + 0x600c);
-
-    do {
+    for (i = 0x1f; i >= 0x1d; i--) {
+        iowrite32(i, mem + 0x6000);
         udelay(20);
-        data = ioread32(mem + 0x600c);
-        pr_info("0x%x\n", data);
-        data = ioread32(mem + 0x6c00);
-        pr_info("0x%x\n", data);
-        if (data & 2) {
-            if (data & 1)
-                data = 0;
-
-            break;
-        }
-    } while (0);
-*/
+        iowrite32(ioread32(mem + 0x6008) | 1, mem + 0x6008);
+        udelay(10000);
+        pr_info("status: 0x%x\n", ioread32(mem + 0x600c));
+        pr_info("data: 0x%x\n", ioread32(mem + 0x6004));
+    }
 /*
     for (i = 0; i < MAC_LENGHT; i++) {
         mac_address[i] = ioread8(mem + MAC_ADDR_OFFSET + i);
